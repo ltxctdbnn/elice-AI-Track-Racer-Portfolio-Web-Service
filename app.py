@@ -1,11 +1,8 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_restful import Api, Resource, reqparse
-from flask_jwt_extended import create_access_token
-from flask_jwt_extended import jwt_required
-from flask_jwt_extended import JWTManager
-from flask_jwt_extended import get_jwt_identity
-from flask_jwt_extended import set_access_cookies
+from flask_jwt_extended import (create_access_token, jwt_required, JWTManager, get_jwt_identity,
+    create_refresh_token)
 import pymysql
 import bcrypt
 
@@ -22,11 +19,12 @@ db = pymysql.connect(
 cursor = db.cursor()
 
 app = Flask(__name__)
-app.config["JWT_SECRET_KEY"] = "fucking-token-cookies"
+app.config["JWT_SECRET_KEY"] = "idontknowabout-token-cookies"
 # 쿠키 활성화
 app.config["JWT_TOKEN_LOCATION"] = ["headers", "cookies"]
 # HTTPS가 아니여도 쿠키를 사용할 수 있도록 허용
 app.config["JWT_COOKIE_SECURE"] = False
+
 
 jwt = JWTManager(app)
 CORS(app, supports_credentials=True)
@@ -51,13 +49,22 @@ def SignIn():
 
         if bcrypt.checkpw(password.encode('utf-8'), user[1].encode('utf-8')):
             access_token = create_access_token(identity=email)
-            response = jsonify({"message": 200,
+            query = 'SELECT * FROM portfolio WHERE email=%s'
+            cursor.execute(query, (email,))
+            user_portfolio = cursor.fetchone()
+            if user_portfolio == None:
+                response = jsonify({"message": 200,
                                 "token": access_token,
                                 "crossCookie":"bar",
                                 "SameSite": None,
                                 "Secure":''})
-            set_access_cookies(response, access_token)
-
+            elif user_portfolio != None:
+                response = jsonify({"message": 200,
+                                "token": access_token,
+                                "crossCookie":"bar",
+                                "SameSite": None,
+                                "Secure":'',
+                                "portfolio": user_portfolio})
             return response
             
         else:
@@ -100,26 +107,32 @@ def SignUp():
             query = "INSERT INTO `user` (`fullname`, `email`, `password`) VALUES (%s, %s, %s)"
             cursor.execute(query, (fullname, email, password))
             db.commit()
-            result = {'message': 'Complete Sign Up, Welcome'}
-
-            return jsonify(result)
+            access_token = create_access_token(identity=email)
+            response = jsonify({"message": 200,
+                                "token": access_token,
+                                "crossCookie":"bar",
+                                "SameSite": None,
+                                "Secure":''})
+            return response
 
 @app.route('/auth/validation', methods=['GET'])
 @jwt_required()
 def validation():
     current_user = get_jwt_identity()
-    return jsonify(logged_in_as=current_user)
+    return jsonify({'status':200,'logged_in_as':current_user})
 
 
 @app.route('/main', methods=['GET', 'POST'])
 @jwt_required()
 def MainPage():
-    return jsonify({"status": "success"})
+    current_user = get_jwt_identity()
+    return jsonify({"status": 200,'logged_in_as':current_user})
 
-@app.route('/portfolio/create', methods=['GET','POST'])
+@app.route('/portfolio/create', methods=['POST'])
 def create():
     if request.method == 'POST':
         data = request.get_json(force=True)['body']
+        print(data)
         lists = data.split('"')
         email = lists[3]
         univ_name = lists[9]
@@ -145,8 +158,26 @@ def create():
         
         return result
 
-@app.route('/portfolio/main', methods=('GET','POST'))
+@app.route('/portfolio/cert', methods=['GET'])
+@jwt_required()
+def create_cert():
+    current_user = get_jwt_identity()
+    return jsonify({'status': 200, 'logged_in_as':current_user})
+
+@app.route('/portfolio/read')
+@jwt_required()
 def read():
+    current_user = get_jwt_identity()
+    query = 'SELECT pf.*, us.fullname FROM `portfolio` AS pf JOIN `user` as us ON pf.email = us.email'
+    cursor.execute(query,)
+    data = cursor.fetchall()
+    return jsonify({'portfolio': data,
+        'status':200})
+
+
+@app.route('/portfolio/main', methods=('GET','POST'))
+@jwt_required()
+def main():
     if request.method == 'GET':
         query = 'SELECT * FROM portfolio'
         cursor.execute(query)
